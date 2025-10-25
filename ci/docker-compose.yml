@@ -1,0 +1,15 @@
+services:
+    ignition:
+        image: inductiveautomation/ignition:8.3.0
+        environment:
+            - ACCEPT_IGNITION_EULA=Y
+            - GATEWAY_ADMIN_PASSWORD=Makaze34!
+            - IGNITION_EDITION=standard
+        ports:
+            - 9088:8088
+            - 9043:8043
+            - 62541:62541
+        volumes:
+            - ignition-data:/usr/local/bin/ignition/data
+volumes:
+    ignition-data:
