@@ -1,6 +1,0 @@
-@moss_backend_HostAddress = http://localhost:5214
-
-GET {{moss_backend_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###

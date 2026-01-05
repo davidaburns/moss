@@ -1,5 +1,7 @@
-using Moss.Services;
 using Serilog;
+using Moss.Services;
+using Moss.Clients;
+using Moss.Extensions;
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
@@ -7,6 +9,8 @@ Log.Logger = new LoggerConfiguration()
     .CreateLogger();
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.Configure<OpcUaConfiguration>(builder.Configuration.GetSection("OpcUa"));
+
 builder.Services.AddOpenApi();
 builder.Services.AddApiVersioning(setupAction => {
     setupAction.DefaultApiVersion = new Microsoft.AspNetCore.Mvc.ApiVersion(1, 0);
@@ -14,6 +18,7 @@ builder.Services.AddApiVersioning(setupAction => {
     setupAction.ReportApiVersions = true;
 });
 builder.Services.AddControllers();
+builder.Services.AddOpcUaClient();
 builder.Services.AddHostedService<OpcSubscriptionService>();
 
 var app = builder.Build();

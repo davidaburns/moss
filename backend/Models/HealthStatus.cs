@@ -1,3 +1,3 @@
-namespace Moss.Models {
-    public record HealthStatusDto(string Status);
-}
+namespace Moss.Models;
+
+public record HealthStatusDto(string Status);
