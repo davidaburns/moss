@@ -5,7 +5,7 @@ using Opc.Ua;
 using Opc.Ua.Client;
 using Opc.Ua.Configuration;
 
-public interface IOpcUaClient {
+public interface IOpcuaClient {
     public Task<bool> ConnectAsync(
         string url,
         IUserIdentity identity,
@@ -14,19 +14,19 @@ public interface IOpcUaClient {
     );
 }
 
-public record OpcUaConfiguration {
-    public string ApplicationName = "MyClient";
-    public ApplicationType ApplicationType = ApplicationType.Client;
-    public bool AddAppCertToTrustedStore = true;
-    public bool AutoAcceptUntrustedCertificates = false;
-    public bool AutoAcceptClients = true;
-    public string CertificatePath = ".certs/share/opc-foundation/pki";
-    public int TransportOperationTimeout = 15000;
-    public int DefaultSessionTimeout = 60000;
-    public int KeepAliveInterval = 5000;
-    public int ReconnectPeriod = 1000;
-    public int ReconnectPeriodBackoff = 15000;
-    public uint SessionLifetime = 60 * 1000;
+public record OpcuaConfiguration {
+    public string ApplicationName { get; set; } = "MyClient";
+    public ApplicationType ApplicationType { get; set; } = ApplicationType.Client;
+    public bool AddAppCertToTrustedStore { get; set; } = true;
+    public bool AutoAcceptUntrustedCertificates { get; set; } = false;
+    public bool AutoAcceptClients { get; set; } = true;
+    public string CertificatePath { get; set; } = ".certs/share/opc-foundation/pki";
+    public int TransportOperationTimeout { get; set; } = 15000;
+    public int DefaultSessionTimeout { get; set; } = 60000;
+    public int KeepAliveInterval { get; set; } = 5000;
+    public int ReconnectPeriod { get; set; } = 1000;
+    public int ReconnectPeriodBackoff { get; set; } = 15000;
+    public uint SessionLifetime { get; set; } = 60 * 1000;
 
     public ApplicationConfiguration ToApplicationConfiguration() {
         Console.WriteLine(CertificatePath);
@@ -68,24 +68,29 @@ public record OpcUaConfiguration {
     }
 }
 
-public class OpcUaClient : IOpcUaClient, IDisposable {
+public class OpcuaClient : IOpcuaClient, IDisposable {
     private readonly Lock _lock = new();
     private readonly ApplicationConfiguration _appConfiguration;
-    private readonly OpcUaConfiguration _configuration;
+    private readonly OpcuaConfiguration _configuration;
     private SessionReconnectHandler? _reconnectHandler;
     private ApplicationInstance _application;
     private ISession? _session;
     private bool _disposed;
     private ILogger _logger;
 
-    public OpcUaClient(
-        IOptions<OpcUaConfiguration> configuration,
-        ILogger<OpcUaClient> logger
+    public OpcuaClient(
+        IOptions<OpcuaConfiguration> configuration,
+        ILogger<OpcuaClient> logger
     ) {
+        _logger = logger;
         _configuration = configuration.Value;
         _appConfiguration = _configuration.ToApplicationConfiguration();
         _appConfiguration.CertificateValidator.CertificateValidation += CertificateValidation;
-        _logger = logger;
+        _application = new ApplicationInstance {
+            ApplicationName = _configuration.ApplicationName,
+            ApplicationType = _configuration.ApplicationType,
+            ApplicationConfiguration = _appConfiguration
+        };
     }
 
     public void Dispose() {
@@ -101,7 +106,7 @@ public class OpcUaClient : IOpcUaClient, IDisposable {
         CancellationToken cancellation = default
     ) {
         if (_disposed) {
-            throw new ObjectDisposedException(nameof(OpcUaClient));
+            throw new ObjectDisposedException(nameof(OpcuaClient));
         }
 
         if (url == null) {
@@ -118,12 +123,6 @@ public class OpcUaClient : IOpcUaClient, IDisposable {
         if (_configuration.AutoAcceptUntrustedCertificates) {
             _appConfiguration.CertificateValidator.CertificateValidation += (s, e) => { e.Accept = (e.Error.StatusCode == Opc.Ua.StatusCodes.BadCertificateUntrusted); };
         }
-
-        _application = new ApplicationInstance {
-            ApplicationName = _configuration.ApplicationName,
-            ApplicationType = _configuration.ApplicationType,
-            ApplicationConfiguration = _appConfiguration
-        };
 
         var valid = await _application.CheckApplicationInstanceCertificatesAsync(false, 2048)
             .ConfigureAwait(false);

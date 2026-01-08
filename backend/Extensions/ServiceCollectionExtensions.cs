@@ -3,12 +3,13 @@ namespace Moss.Extensions;
 using Moss.Clients;
 
 public static class ServiceCollectionExtensions {
-    public static IServiceCollection AddOpcUaClient(this IServiceCollection services, Action<OpcUaConfiguration>? configure = null) {
+    public static IServiceCollection AddOpcuaClient(this IServiceCollection services, Action<OpcuaConfiguration>? configure = null) {
         if (configure != null) {
+            Console.WriteLine("Configuring service");
             services.Configure(configure);
         }
 
-        services.AddSingleton<IOpcUaClient, OpcUaClient>();
+        services.AddSingleton<IOpcuaClient, OpcuaClient>();
         return services;
     }
 }

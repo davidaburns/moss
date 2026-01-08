@@ -6,10 +6,10 @@ using Moss.Clients;
 public class OpcSubscriptionService : BackgroundService {
     private readonly IConfiguration _configuration;
     private readonly ILogger<OpcSubscriptionService> _logger;
-    private IOpcUaClient _client;
+    private IOpcuaClient _client;
 
     public OpcSubscriptionService(
-        IOpcUaClient opcClient,
+        IOpcuaClient opcClient,
         IConfiguration configuration,
         ILogger<OpcSubscriptionService> logger
     ) {
