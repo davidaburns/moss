@@ -275,3 +275,6 @@ docker-compose.override.yml
 
 # Local folders and files
 local/
+
+# Certificates
+.certs/

@@ -28,7 +28,7 @@ public class OpcSubscriptionService : BackgroundService {
 
 
         if (discoveryUrl is null) {
-            throw new ArgumentNullException("Opcua DiscoverUrl must be provided in configuration");
+            throw new ArgumentNullException("Opcua DiscoveryUrl must be provided in configuration");
         }
         if (username is null) {
             throw new ArgumentNullException("Opcua Username must be provided in configuration");

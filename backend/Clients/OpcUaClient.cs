@@ -20,6 +20,7 @@ public record OpcUaConfiguration {
     public bool AddAppCertToTrustedStore = true;
     public bool AutoAcceptUntrustedCertificates = false;
     public bool AutoAcceptClients = true;
+    public string CertificatePath = ".certs/share/opc-foundation/pki";
     public int TransportOperationTimeout = 15000;
     public int DefaultSessionTimeout = 60000;
     public int KeepAliveInterval = 5000;
@@ -28,6 +29,7 @@ public record OpcUaConfiguration {
     public uint SessionLifetime = 60 * 1000;
 
     public ApplicationConfiguration ToApplicationConfiguration() {
+        Console.WriteLine(CertificatePath);
         return new ApplicationConfiguration {
             ApplicationName = ApplicationName,
             ApplicationType = ApplicationType,
@@ -35,20 +37,20 @@ public record OpcUaConfiguration {
             SecurityConfiguration = new SecurityConfiguration {
                 ApplicationCertificate = new CertificateIdentifier {
                     StoreType = "Directory",
-                    StorePath = @"%CommonApplicationData%\OPC Foundation\CertificateStores\MachineDefault",
+                    StorePath = $"{CertificatePath}/certificate-stores/machine-default",
                     SubjectName = "MyClientSubjectName",
                 },
                 TrustedIssuerCertificates = new CertificateTrustList {
                     StoreType = "Directory",
-                    StorePath = @"%CommonApplicationData%\OPC Foundation\CertificateStores\UA Certificate Authorities",
+                    StorePath = $"{CertificatePath}/certificate-stores/ua-certificate-authorities",
                 },
                 TrustedPeerCertificates = new CertificateTrustList {
                     StoreType = "Directory",
-                    StorePath = @"%CommonApplicationData%\OPC Foundation\CertificateStores\UA Applications",
+                    StorePath = $"{CertificatePath}/certificate-stores/ua-applications",
                 },
                 RejectedCertificateStore = new CertificateTrustList {
                     StoreType = "Directory",
-                    StorePath = @"%CommonApplicationData%\OPC Foundation\CertificateStores\RejectedCertificates",
+                    StorePath = $"{CertificatePath}/certificate-stores/rejected-certificates",
                 },
                 AddAppCertToTrustedStore = AddAppCertToTrustedStore,
                 AutoAcceptUntrustedCertificates = AutoAcceptUntrustedCertificates,
@@ -72,7 +74,7 @@ public class OpcUaClient : IOpcUaClient, IDisposable {
     private readonly OpcUaConfiguration _configuration;
     private SessionReconnectHandler? _reconnectHandler;
     private ApplicationInstance _application;
-    private Opc.Ua.Client.ISession? _session;
+    private ISession? _session;
     private bool _disposed;
     private ILogger _logger;
 
@@ -129,6 +131,7 @@ public class OpcUaClient : IOpcUaClient, IDisposable {
         _logger.LogInformation($"Valid Application Certificate: {valid}");
         _logger.LogInformation($"Connecting to {url}");
         _logger.LogInformation($"Application Certificate: {_appConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate.ToString()}");
+
         ITransportWaitingConnection? connection = null;
         EndpointDescription endpointDescription = await CoreClientUtils.SelectEndpointAsync(
             _appConfiguration,
@@ -140,7 +143,7 @@ public class OpcUaClient : IOpcUaClient, IDisposable {
         EndpointConfiguration endpointConfiguration = EndpointConfiguration.Create(_appConfiguration);
         ConfiguredEndpoint endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
         TraceableSessionFactory sessionFactory = TraceableSessionFactory.Instance;
-        Opc.Ua.Client.ISession session = await sessionFactory.CreateAsync(
+        ISession session = await sessionFactory.CreateAsync(
             _appConfiguration,
             connection,
             endpoint,
@@ -169,7 +172,7 @@ public class OpcUaClient : IOpcUaClient, IDisposable {
         return true;
     }
 
-    private void SessionKeepAlive(Opc.Ua.Client.ISession session, KeepAliveEventArgs e) {
+    private void SessionKeepAlive(ISession session, KeepAliveEventArgs e) {
         try {
             if (_session == null || !_session.Equals(session) || !ServiceResult.IsBad(e.Status)) {
                 return;
@@ -219,7 +222,7 @@ public class OpcUaClient : IOpcUaClient, IDisposable {
     protected virtual void CertificateValidation(CertificateValidator sender, CertificateValidationEventArgs e) {
         bool accepted = false;
         ServiceResult error = e.Error;
-        if (error.StatusCode == Opc.Ua.StatusCodes.BadCertificateUntrusted && _configuration.AutoAcceptClients) {
+        if (error.StatusCode == StatusCodes.BadCertificateUntrusted && _configuration.AutoAcceptClients) {
             accepted = true;
         }
 

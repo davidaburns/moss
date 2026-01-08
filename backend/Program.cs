@@ -8,9 +8,13 @@ Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
     .CreateLogger();
 
-var builder = WebApplication.CreateBuilder(args);
-builder.Services.Configure<OpcUaConfiguration>(builder.Configuration.GetSection("OpcUa"));
+var builder = WebApplication
+    .CreateBuilder(args);
+builder.Configuration
+    .SetBasePath(Directory.GetCurrentDirectory())
+    .AddJsonFile("appsettings.development.json", optional: true, reloadOnChange: true);
 
+builder.Services.Configure<OpcUaConfiguration>(builder.Configuration.GetSection("Opcua"));
 builder.Services.AddOpenApi();
 builder.Services.AddApiVersioning(setupAction => {
     setupAction.DefaultApiVersion = new Microsoft.AspNetCore.Mvc.ApiVersion(1, 0);
