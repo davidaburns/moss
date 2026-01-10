@@ -37,11 +37,36 @@ public class OpcSubscriptionService : BackgroundService {
             throw new ArgumentNullException("Opcua Password must be provided in configuration");
         }
 
-        await _client.ConnectAsync(discoveryUrl, new UserIdentity(username, password));
+        var connected = await _client.ConnectAsync(discoveryUrl, new UserIdentity(username, password));
+        if (connected) {
+            _logger.LogInformation("Successfully connected to opcua server");
+        };
+
+        var subscriptionConfig = new OpcuaSubscriptionConfiguration {
+            DisplayName="TEST_SUBSCRIPTION",
+            PublishingEnabled=true
+        };
+
         while (!cancellation.IsCancellationRequested) {
             await Task.Delay(10);
         }
 
+        if (_client.IsConnected()) {
+            await _client.DisconnectAsync(false, cancellation);
+        }
+
         _logger.LogInformation("Stopping opc subcription service");
+    }
+
+    private void SubscriptionEventHandler(OpcuaSubscriptionEventArgs args) {
+        _logger.LogInformation(
+            "MonitoredItemNotification[{0}]: {1}, Previous={2}, Current={3}, Source={4}, Local={5}",
+            args.Sequence,
+            args.Node,
+            args.PreviousValue,
+            args.Value,
+            args.SourceTimestamp,
+            args.LocalTimestamp
+        );
     }
 }

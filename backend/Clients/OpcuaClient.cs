@@ -1,17 +1,25 @@
 namespace Moss.Clients;
 
+using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
 using Opc.Ua;
 using Opc.Ua.Client;
 using Opc.Ua.Configuration;
 
 public interface IOpcuaClient {
-    public Task<bool> ConnectAsync(
-        string url,
-        IUserIdentity identity,
-        bool useSecurity = true,
+    public Task<bool> ConnectAsync(string url, IUserIdentity identity, bool useSecurity = true, CancellationToken cancellation = default);
+    public Task DisconnectAsync(bool leaveChannelOpen, CancellationToken cancellation = default);
+    public Task<DataValueCollection?> ReadAsync(NodeId node, CancellationToken cancellation = default);
+    public Task SubscribeTo(
+        NodeId node,
+        uint nodeAttribute,
+        Action<OpcuaSubscriptionEventArgs> eventHandler,
+        OpcuaSubscriptionConfiguration? config = null,
+        bool durable = false,
         CancellationToken cancellation = default
     );
+
+    public bool IsConnected();
 }
 
 public record OpcuaConfiguration {
@@ -68,6 +76,29 @@ public record OpcuaConfiguration {
     }
 }
 
+public record OpcuaSubscriptionConfiguration {
+    public string DisplayName = "DEFAULT_SUBSCRIPTION_NAME";
+    public bool PublishingEnabled = true;
+    public bool SequentialPublishing = true;
+    public int PublishingInterval = 100;
+    public int MaxNotificationsPerPublish = 1000;
+    public int ItemSamplingInterval = 100;
+    public bool Durable = false;
+    public uint QueueSize = 10;
+    public uint KeepAliveCount = 5;
+    public uint LifetimeCount = 0;
+}
+
+public record OpcuaSubscriptionEventArgs(
+    uint? Sequence,
+    string Node,
+    DateTime? SourceTimestamp,
+    DateTime LocalTimestamp,
+    uint? Status,
+    object? PreviousValue,
+    object? Value
+);
+
 public class OpcuaClient : IOpcuaClient, IDisposable {
     private readonly Lock _lock = new();
     private readonly ApplicationConfiguration _appConfiguration;
@@ -75,6 +106,7 @@ public class OpcuaClient : IOpcuaClient, IDisposable {
     private SessionReconnectHandler? _reconnectHandler;
     private ApplicationInstance _application;
     private ISession? _session;
+    private Subscription? _subscription;
     private bool _disposed;
     private ILogger _logger;
 
@@ -96,7 +128,11 @@ public class OpcuaClient : IOpcuaClient, IDisposable {
     public void Dispose() {
         _disposed = true;
         Utils.SilentDispose(_session);
+        GC.SuppressFinalize(this);
+    }
 
+    public bool IsConnected() {
+        return _session?.Connected == true;
     }
 
     public async Task<bool> ConnectAsync(
@@ -192,6 +228,141 @@ public class OpcuaClient : IOpcuaClient, IDisposable {
             e.CancelKeepAlive = true;
         } catch (Exception ex) {
             _logger.LogError($"Error in OnKeepAlive: {ex.Message}");
+        }
+    }
+
+    public async Task DisconnectAsync(bool leaveChannelOpen = false, CancellationToken cancellation = default) {
+        try {
+            _logger.LogInformation("Diconnecting opcua client");
+            if (_session == null || !IsConnected()) {
+                _logger.LogWarning("Could not disconnect opcua client, session is not connected");
+                return;
+            }
+
+            lock(_lock) {
+                _session.KeepAlive -= SessionKeepAlive;
+                _reconnectHandler?.Dispose();
+                _reconnectHandler = null;
+            }
+
+            await _session.CloseAsync(!leaveChannelOpen, cancellation).ConfigureAwait(false);
+            if (leaveChannelOpen) {
+                _session.DetachChannel();
+            }
+
+            _session.Dispose();
+            _session = null;
+            _logger.LogInformation("Opcua client session disconnected");
+        } catch (Exception ex) {
+            _logger.LogError("Error while trying to disconnect opcua client: {}", ex);
+        }
+    }
+
+    public async Task<DataValueCollection?> ReadAsync(NodeId node, CancellationToken cancellation = default) {
+        if (_session == null || !IsConnected()) {
+            _logger.LogWarning("Cannot read opcua server, session is not connected");
+            return null;
+        }
+
+        try {
+            var nodes = new ReadValueIdCollection {
+                new ReadValueId {NodeId=node, AttributeId=Attributes.Value},
+                new ReadValueId {NodeId=node, AttributeId=Attributes.DataType},
+                new ReadValueId {NodeId=node, AttributeId=Attributes.DataTypeDefinition},
+                new ReadValueId {NodeId=node, AttributeId=Attributes.DisplayName},
+            };
+
+            var response = await _session.ReadAsync(null, 0, TimestampsToReturn.Both, nodes, cancellation).ConfigureAwait(false);
+            ClientBase.ValidateResponse(response.Results, nodes);
+
+            return response.Results;
+        } catch (Exception ex) {
+            _logger.LogError("Error while reading nodes: {}", ex);
+            return null;
+        }
+    }
+
+    public async Task SubscribeTo(
+        NodeId node,
+        uint nodeAttribute,
+        Action<OpcuaSubscriptionEventArgs> eventHandler,
+        OpcuaSubscriptionConfiguration? config = null,
+        bool durable = false,
+        CancellationToken cancellation = default
+    ) {
+        try {
+            if (_session == null || !IsConnected()) {
+                _logger.LogWarning("Cannot subscribe to opcua node, session is not connected");
+                return;
+            }
+            if (config == null) {
+                config = new OpcuaSubscriptionConfiguration();
+            }
+            if (_subscription == null) {
+                _subscription = new Subscription(_session.DefaultSubscription) {
+                    DisplayName = config.DisplayName,
+                    PublishingEnabled = config.PublishingEnabled,
+                    PublishingInterval = config.PublishingInterval,
+                    LifetimeCount = config.LifetimeCount,
+                    KeepAliveCount = config.KeepAliveCount,
+                    DisableMonitoredItemCache = false,
+                };
+
+                _session.AddSubscription(_subscription);
+                await _subscription.CreateAsync(cancellation).ConfigureAwait(false);
+
+                _logger.LogInformation("Subscription created with id={0}, sampling interval={1}, publishing interval={2}",
+                    _subscription.Id,
+                    config.ItemSamplingInterval,
+                    config.PublishingInterval
+                );
+
+                if (config.Durable) {
+                    (bool success, uint revisedLifetime) = await _subscription.SetSubscriptionDurableAsync(1, cancellation).ConfigureAwait(false);
+                    if (success) {
+                        _logger.LogInformation("Subscription is {0} now durable, revised lifetime {1} in hours", _subscription.Id, revisedLifetime);
+                    } else {
+                        _logger.LogWarning("Subscription {0} failed durable call", _subscription.Id);
+                    }
+                }
+            }
+
+            var item = new MonitoredItem(_subscription.DefaultItem) {
+                DisplayName = config.DisplayName,
+                StartNodeId=node,
+                AttributeId=nodeAttribute,
+                SamplingInterval=config.ItemSamplingInterval,
+                QueueSize=config.QueueSize,
+                CacheQueueSize=(int)config.QueueSize,
+                DiscardOldest=false,
+                MonitoringMode=MonitoringMode.Reporting
+            };
+
+            item.Notification += (item, e) => {
+                try {
+                    var notification = e.NotificationValue as MonitoredItemNotification;
+                    var args = new OpcuaSubscriptionEventArgs (
+                      Sequence: notification?.Message.SequenceNumber,
+                      Node: item.ResolvedNodeId.ToString(),
+                      SourceTimestamp: notification?.Value.SourceTimestamp,
+                      LocalTimestamp: DateTime.Now,
+                      Status: notification?.Value.StatusCode.Code,
+                      PreviousValue: null,
+                      Value: notification?.Value.Value
+                    );
+
+                    eventHandler(args);
+                } catch(Exception ex) {
+                    _logger.LogError("MonitoredItem error: {}", ex);
+                }
+            };
+
+            _subscription.AddItem(item);
+            await _subscription.ApplyChangesAsync(cancellation).ConfigureAwait(false);
+
+            _logger.LogInformation("Monitored item for node {0} added for subscription {1}", node, _subscription.Id);
+        } catch (Exception ex) {
+            _logger.LogError("Error while attempting to subscribe to items: {0}", ex);
         }
     }
 
