@@ -1,4 +1,5 @@
 using Serilog;
+using FluentMigrator.Runner;
 using Moss.Services;
 using Moss.Clients;
 using Moss.Extensions;
@@ -10,6 +11,13 @@ Log.Logger = new LoggerConfiguration()
 
 var builder = WebApplication
     .CreateBuilder(args);
+
+builder.Services.AddFluentMigratorCore()
+    .ConfigureRunner(rb => rb
+        .AddPostgres()
+        .WithGlobalConnectionString(builder.Configuration.GetConnectionString("Database"))
+        .ScanIn([typeof(Program).Assembly]))
+    .AddLogging(lb => lb.AddFluentMigratorConsole());
 
 builder.Services.Configure<OpcuaConfiguration>(builder.Configuration.GetSection("Opcua"));
 builder.Services.AddOpenApi();
@@ -35,5 +43,10 @@ app.UseRouting();
 app.UseEndpoints(endpoints => {
     endpoints.MapControllers();
 });
+
+using (var scope = app.Services.CreateScope()) {
+    var runner = scope.ServiceProvider.GetRequiredService<IMigrationRunner>();
+    runner.MigrateUp();
+}
 
 app.Run();
