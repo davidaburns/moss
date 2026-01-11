@@ -47,6 +47,13 @@ public class OpcSubscriptionService : BackgroundService {
             PublishingEnabled=true
         };
 
+        await _client.SubscribeTo(
+            node: "ns=1;s=[Simulation]_Meta:Realistic/Realistic0",
+            Attributes.Value,
+            cancellation: cancellation,
+            eventHandler: SubscriptionEventHandler
+        );
+
         while (!cancellation.IsCancellationRequested) {
             await Task.Delay(10);
         }
